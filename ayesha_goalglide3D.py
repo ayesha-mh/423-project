@@ -95,17 +95,16 @@ def GG3D_Penalty(cmd=None, **kw):
         S['label'] = None;   S['label_timer'] = 0
         return
 
-    # ---------- START ----------
-    if cmd == 'start':
+  
+    if cmd == 'start'
         ball    = kw['ball']
         shooter = kw.get('shooter')    
-        keeper  = kw.get('keeper')      # enemies GK (TOP)
-
+        keeper  = kw.get('keeper')      
         bx, by = 0.0, GRID_LENGTH - 180.0
         gx, gy = 0.0, GRID_LENGTH - 60.0
         S['spot'], S['goal'] = (bx, by), (gx, gy)
 
-        # ball at spot, stopped
+     
         ball['x'], ball['y'] = bx, by
         ball['vx'], ball['vy'] = 0.0, 0.0
 
@@ -375,5 +374,6 @@ def keyboardListener(key, x, y):
     globals()['player_x'] = player_x_clamped
     globals()['player_y'] = player_y_clamped
     glutPostRedisplay()
+
 
 
