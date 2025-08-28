@@ -1,0 +1,1 @@
+GoalGlide 3D is a fast-paced 3D soccer challenge where you take control of a player in an immersive arena and aim to outmaneuver defenders, control the ball, and score as many goals as possible within the match time. With responsive controls and dynamic AI opponents, every match feels fresh, exciting, and competitive.
