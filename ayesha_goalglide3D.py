@@ -1,0 +1,388 @@
+
+
+def draw_hud():
+    now = glutGet(GLUT_ELAPSED_TIME)
+    remaining = match_ms - (now - match_start_ms)
+    draw_text(10, WINDOW_HEIGHT-28, f"Time: {max(0, remaining//1000)}s")
+    draw_text(10, WINDOW_HEIGHT-52, f"Score You {player_score} : {ai_score} AI")
+    draw_text(10, WINDOW_HEIGHT-76, "Kick: SPACE/LeftClick | Move: WASD | RightClick: FPP | T: TopDown | R: Restart")
+        # for penalty
+    GG3D_Penalty('draw_hud', draw_text=draw_text, x=10, y=80)
+
+    if game_over:
+        winner = "You Win!" if player_score > ai_score else ("Draw!" if player_score == ai_score else "AI Wins!")
+        draw_text(WINDOW_WIDTH//2 - 60, WINDOW_HEIGHT//2 + 20, "GAME OVER")
+        draw_text(WINDOW_WIDTH//2 - 60, WINDOW_HEIGHT//2 - 4, winner)
+        draw_text(WINDOW_WIDTH//2 - 120, WINDOW_HEIGHT//2 - 28, "Press R to Restart")
+    
+def update_goalkeeper_xy(p, ball): 
+    """
+    Minimal bottom-goal keeper: always patrols left–right,
+    and tracks ball.x a bit when the ball is inbound.
+    No catches, no ball edits — just visible GK movement.
+    """
+
+    # ---- Goal/mouth bounds (BOTTOM goal) ----
+    goal_y = -GRID_LENGTH + 60.0
+    x_min  = -GOAL_MOUTH * 0.5
+    x_max  =  GOAL_MOUTH * 0.5
+    slide_limit = GOAL_MOUTH * 0.45  # patrol within the mouth
+
+    # ---- Persistent phase for patrol (store on the player dict) ----
+    phase = p.get('gk_phase', 0.0)
+    phase += 0.06                       # patrol speed (lower = slower)
+    if phase > (math.pi * 2.0):
+        phase -= math.pi * 2.0
+    p['gk_phase'] = phase
+
+    # Base patrol: smooth left–right oscillation around center
+    PATROL_AMPL = slide_limit * 0.75    # amplitude within mouth
+    patrol_x    = math.sin(phase) * PATROL_AMPL
+
+    # Light tracking when ball is coming toward bottom goal
+    inbound = (ball['vy'] > 0.25) and (ball['y'] < 0.0)
+    if inbound:
+        # blend some of ball.x so it feels responsive but still patrols
+        target_x = patrol_x * 0.5 + clamp(ball['x'], -slide_limit, slide_limit) * 0.5
+    else:
+        target_x = patrol_x
+
+    # Keep within the mouth
+    target_x = clamp(target_x, -slide_limit, slide_limit)
+
+    # ---- Move with gentle easing and a small speed cap ----
+    EASE      = 0.18
+    MAX_STEP  = 0.65
+    step_x    = (target_x - p['x']) * EASE
+    if abs(step_x) > MAX_STEP:
+        step_x = MAX_STEP if step_x > 0 else -MAX_STEP
+
+    p['x'] = clamp(p['x'] + step_x, x_min, x_max)
+    p['y'] = goal_y  # stay on the line (no in/out requested)
+
+    # Face the ball (visual only)
+    dx, dy = ball['x'] - p['x'], ball['y'] - p['y']
+    if dx*dx + dy*dy > 1e-6:
+        p['angle'] = math.degrees(math.atan2(dy, dx)) - 90
+# =========================
+def GG3D_Penalty(cmd=None, **kw):
+    """
+    Penalty mode:
+      'start'   : set up PK vs TOP goal; shooter waits; GK patrols
+      'shoot'   : fire toward TOP goal, aiming where the oscillating aimer is
+      'update'  : smooth shooter "aim sway"; opponent GK slides L/R + steps out
+      'active'  : bool (is penalty running?)
+      'draw_hud': tiny banner (call from draw_hud)
+      'end'     : force end
+    """
+    S = GG3D_Penalty.__dict__.setdefault('_S', {
+        'active': False, 'waiting': False, 'frame': 0,
+        'spot': (0.0, GRID_LENGTH - 180.0),       # TOP penalty spot
+        'goal': (0.0, GRID_LENGTH - 60.0),        # TOP goal line center
+        'shooter_id': None, 'keeper_id': None,
+        'label': None, 'label_timer': 0,
+        # penalty-specific anim state
+        'aim_phase': 0.0, 'aim_x': 0.0,           # oscillating aimer x
+    })
+
+    def _unit(x, y):
+        m = math.hypot(x, y)
+        return (x/m, y/m) if m > 1e-8 else (0.0, 0.0)
+
+    if cmd == 'active':
+        return S['active']
+
+    if cmd == 'end':
+        S['active'] = False; S['waiting'] = False
+        S['label'] = None;   S['label_timer'] = 0
+        return
+
+    # ---------- START ----------
+    if cmd == 'start':
+        ball    = kw['ball']
+        shooter = kw.get('shooter')     # my_team (non-keeper)
+        keeper  = kw.get('keeper')      # enemies GK (TOP)
+
+        bx, by = 0.0, GRID_LENGTH - 180.0
+        gx, gy = 0.0, GRID_LENGTH - 60.0
+        S['spot'], S['goal'] = (bx, by), (gx, gy)
+
+        # ball at spot, stopped
+        ball['x'], ball['y'] = bx, by
+        ball['vx'], ball['vy'] = 0.0, 0.0
+
+        # shooter behind the ball; we will animate sideways sway (not WASD)
+        if shooter and not shooter.get('is_keeper', False):
+            shooter['x'] = bx
+            shooter['y'] = by - 28.0
+            shooter['angle'] = math.degrees(math.atan2(gy - shooter['y'], gx - shooter['x'])) - 90
+            S['shooter_id'] = id(shooter)
+        else:
+            S['shooter_id'] = None
+
+        # opponent GK centered, facing ball
+        if keeper:
+            keeper['x'] = 0.0
+            keeper['y'] = gy
+            keeper['angle'] = math.degrees(math.atan2(by - keeper['y'], bx - keeper['x'])) - 90
+            S['keeper_id'] = id(keeper)
+        else:
+            S['keeper_id'] = None
+
+        # reset anim
+        S['aim_phase'] = 0.0
+        S['aim_x']     = bx
+
+        S['active'] = True
+        S['waiting'] = True
+        S['frame'] = 0
+        S['label'] = "PENALTY: Tap SPACE to shoot"
+        S['label_timer'] = 120
+        return
+
+    # ---------- SHOOT ----------
+    if cmd == 'shoot':
+        if not S['active'] or not S['waiting']:
+            return
+        ball = kw['ball']
+        bx, by = S['spot']; gx, gy = S['goal']
+
+        # aim to TOP goal using the current oscillating aim_x
+        aim_x = S.get('aim_x', gx)
+        ux, uy = _unit(aim_x - bx, gy - by)
+
+        SHOT_SPEED = 16.0
+        ball['x'], ball['y'] = bx, by
+        ball['vx'], ball['vy'] = ux * SHOT_SPEED, uy * SHOT_SPEED
+        cap_ball_speed()
+
+        S['waiting'] = False
+        S['label'] = "Shot taken"
+        S['label_timer'] = 50
+        return
+
+    # ---------- UPDATE ----------
+    if cmd == 'update':
+        ball = kw['ball']
+        mt = kw.get('my_team', globals().get('my_team', []))
+        et = kw.get('enemies',  globals().get('enemies', []))
+        if not S['active']:
+            return False
+
+        S['frame'] += 1
+        bx, by = S['spot']; gx, gy = S['goal']
+
+        # --- Shooter: smooth side-to-side "aim sway" (NO WASD NEEDED) ---
+        shooter = next((p for p in mt if id(p) == S['shooter_id']), None)
+        if S['waiting'] and shooter:
+            # sway across the mouth; you confirm aim by timing SPACE
+            sway_limit = min(GOAL_MOUTH * 0.45, 80.0)
+            S['aim_phase'] = (S['aim_phase'] + 0.055) % (math.pi * 2.0)
+            target_x = bx + math.sin(S['aim_phase']) * sway_limit   # desired aim X on spot
+            S['aim_x'] = clamp(target_x, bx - sway_limit, bx + sway_limit)
+
+            # move shooter smoothly toward that x (stay behind ball)
+            ease = 0.20
+            max_step = 0.9
+            dxs = (S['aim_x'] - shooter['x']) * ease
+            if abs(dxs) > max_step: dxs = max_step if dxs > 0 else -max_step
+            shooter['x'] = clamp(shooter['x'] + dxs, bx - sway_limit, bx + sway_limit)
+            shooter['y'] = by - 28.0  # fixed row behind the ball
+            shooter['angle'] = math.degrees(math.atan2(gy - shooter['y'], gx - shooter['x'])) - 90
+
+            # keep ball pinned on spot until shoot
+            ball['x'], ball['y'] = bx, by
+            ball['vx'], ball['vy'] = 0.0, 0.0
+
+        # --- Opponent GK: smooth L/R tracking + tiny step out (X and Y motion) ---
+        keeper = next((p for p in et if id(p) == S['keeper_id']), None)
+        if keeper:
+            mouth = GOAL_MOUTH * 0.45
+            # blend patrol with tracking so it looks alive even when waiting
+            patrol = math.sin(S['frame'] * 0.045) * (mouth * 0.65)
+            if S['waiting']:
+                target_x = 0.6 * patrol + 0.4 * clamp(S['aim_x'], -mouth, mouth)
+            else:
+                target_x = clamp(ball['x'], -mouth, mouth)  # track ball after shot
+
+            # step slightly out from line as ball gets closer to the line
+            dist_to_line = max(0.0, gy - ball['y'])
+            target_y = gy - min(24.0, dist_to_line * 0.25)
+
+            # smooth motion with cap
+            ease_x, ease_y = 0.18, 0.14
+            max_step = 0.85
+            dxk = (target_x - keeper['x']) * ease_x
+            dyk = (target_y - keeper['y']) * ease_y
+            step_len = math.hypot(dxk, dyk)
+            if step_len > max_step:
+                uxk, uyk = _unit(dxk, dyk)
+                dxk, dyk = uxk * max_step, uyk * max_step
+
+            keeper['x'] = clamp(keeper['x'] + dxk, -mouth, mouth)
+            keeper['y'] = clamp(keeper['y'] + dyk, gy - 24.0, gy)  # never past the line
+
+            # face the ball
+            fx, fy = ball['x'] - keeper['x'], ball['y'] - keeper['y']
+            if fx*fx + fy*fy > 1e-6:
+                keeper['angle'] = math.degrees(math.atan2(fy, fx)) - 90
+
+            # try save AFTER the shot (simple deflect if close)
+            if not S['waiting']:
+                if math.hypot(fx, fy) < (BODY_WIDTH * 0.8 + BALL_RADIUS):
+                    ball['vy'] = -abs(ball['vy']) * 0.6
+                    ball['vx'] *= 0.6
+                    cap_ball_speed()
+                    S['label'] = "SAVE!"
+                    S['label_timer'] = 50
+                    S['active'] = False
+                    S['waiting'] = False
+
+        # quit penalty once ball leaves far edge; normal goal/reset handles scoring
+        if abs(ball['y']) > GRID_LENGTH - 10.0:
+            S['active'] = False; S['waiting'] = False
+
+        if S['label_timer'] > 0:
+            S['label_timer'] -= 1
+        return True
+
+    # ---------- DRAW_HUD ----------
+    if cmd == 'draw_hud':
+        draw_text = kw.get('draw_text')
+        x = kw.get('x', 10); y = kw.get('y', 80)
+        if not draw_text: return
+        if S['active']:
+            msg = S['label'] if (S['label'] and S['label_timer'] > 0) else "PENALTY"
+            draw_text(x, y, msg)
+        return
+
+def idle_update():
+    global game_over
+
+    # Penalty-only update (pause normal game while active)
+    if GG3D_Penalty('active'):
+        GG3D_Penalty('update', ball=ball, my_team=my_team, enemies=enemies)
+        update_ball()  # integrate ball motion during penalty
+        glutPostRedisplay()
+        glutTimerFunc(16, lambda t=0: idle_update(), 0)
+        return
+
+    # Normal game
+    if not game_over:
+        enemy_ai_update()
+        my_team_update()
+        update_ball()
+
+        # sync the user-controlled player's struct
+        for p in my_team:
+            if p.get('is_user', False):
+                p['x'] = player_x
+                p['y'] = player_y
+                p['angle'] = player_angle
+
+        # timer check
+        now = glutGet(GLUT_ELAPSED_TIME)
+        remaining = match_ms - (now - match_start_ms)
+        if remaining <= 0:
+            game_over = True
+
+    glutPostRedisplay()
+    glutTimerFunc(16, lambda t=0: idle_update(), 0)
+
+
+
+
+def keyboardListener(key, x, y):
+    global player_x, player_y, player_angle, game_over, player_score, ai_score, match_start_ms, first_person, topdown_view
+    move_step = 10 * PLAYER_SCALE
+    angle_step = 6
+    k = key.decode("utf-8").lower()
+
+    # -------- PENALTY KEYS FIRST (so nothing else blocks them) --------
+    # Start a penalty: my_team (non-keeper) shooter vs enemies' keeper at TOP goal
+    if k == 'p':
+        shooter = next((pp for pp in my_team if pp.get('is_user', False) and not pp.get('is_keeper', False)), None)
+        if shooter is None:
+            fielders = [pp for pp in my_team if not pp.get('is_keeper', False)]
+            shooter = fielders[0] if fielders else (my_team[0] if my_team else None)
+
+        opp_keeper = next((pp for pp in enemies if pp.get('is_keeper', False)), None)
+        if opp_keeper is None and enemies:
+            opp_keeper = enemies[0]
+
+        if shooter is not None and opp_keeper is not None:
+            GG3D_Penalty('start', ball=ball, shooter=shooter, keeper=opp_keeper)
+        glutPostRedisplay()
+        return
+
+    # While penalty is active:
+    #  - SPACE fires the shot
+    #  - Ignore WASD/QE so shooter isn't moved by normal controls
+    if GG3D_Penalty('active'):
+        if k == ' ':
+            GG3D_Penalty('shoot', ball=ball)
+            glutPostRedisplay()
+            return
+        if k in ('w', 'a', 's', 'd', 'q', 'e'):
+            glutPostRedisplay()
+            return
+    # ------------------------------------------------------------------
+
+    if k == '\x1b':  # ESC
+        try:
+            glutLeaveMainLoop()
+        except:
+            pass
+        return
+
+    if k == 'r' and game_over:
+        player_score = 0
+        ai_score = 0
+        reset_ball()
+        init_teams()
+        game_over = False
+        match_start_ms = glutGet(GLUT_ELAPSED_TIME)
+        return
+
+    if game_over:
+        return
+
+    if k == 't':
+        topdown_view = not topdown_view
+    elif k == 'c':
+        pass
+    elif k == 'w':
+        rad = math.radians(player_angle + 90)
+        player_x += math.cos(rad) * move_step
+        player_y += math.sin(rad) * move_step
+        maybe_dribble_push(True)
+    elif k == 's':
+        rad = math.radians(player_angle + 90)
+        player_x -= math.cos(rad) * move_step
+        player_y -= math.sin(rad) * move_step
+    elif k == 'a':
+        player_angle += angle_step
+    elif k == 'd':
+        player_angle -= angle_step
+    elif k == 'q':
+        rad = math.radians(player_angle)
+        player_x += math.cos(rad) * (-move_step)
+        player_y += math.sin(rad) * (-move_step)
+    elif k == 'e':
+        rad = math.radians(player_angle)
+        player_x += math.cos(rad) * (move_step)
+        player_y += math.sin(rad) * (move_step)
+    elif k == ' ':
+        try_kick(True)
+
+    # keep inside pitch + mirror user's pose into my_team
+    player_x_clamped = clamp(player_x, -GRID_LENGTH, GRID_LENGTH)
+    player_y_clamped = clamp(player_y, -GRID_LENGTH, GRID_LENGTH)
+    for p in my_team:
+        if p.get('is_user', False):
+            p['x'], p['y'] = player_x_clamped, player_y_clamped
+            p['angle'] = player_angle
+    globals()['player_x'] = player_x_clamped
+    globals()['player_y'] = player_y_clamped
+    glutPostRedisplay()
+
