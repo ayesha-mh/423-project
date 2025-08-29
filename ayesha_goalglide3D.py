@@ -1,3 +1,11 @@
+GRAVITY_Z      = -0.5
+BOUNCE_Z       = 0.40
+AIR_DRAG       = 0.995
+FLY_LIFT_SMALL = 9.5      
+LONG_SHOT_LIFT = 8.0   
+
+
+ball = {'x': 0.0, 'y': 0.0, 'z': BALL_RADIUS, 'vx': 0.0, 'vy': 0.0, 'vz': 0.0}
 
 
 def draw_hud():
@@ -15,7 +23,32 @@ def draw_hud():
         draw_text(WINDOW_WIDTH//2 - 60, WINDOW_HEIGHT//2 + 20, "GAME OVER")
         draw_text(WINDOW_WIDTH//2 - 60, WINDOW_HEIGHT//2 - 4, winner)
         draw_text(WINDOW_WIDTH//2 - 120, WINDOW_HEIGHT//2 - 28, "Press R to Restart")
-    
+def try_fly_chip():
+    rad = math.radians(player_angle + 90)
+    foot_x = player_x + math.cos(rad) * (BODY_WIDTH * 0.9 + 6.0)
+    foot_y = player_y + math.sin(rad) * (BODY_WIDTH * 0.9 + 6.0)
+    d = dist2d(foot_x, foot_y, ball['x'], ball['y'])
+    if d <= (KICK_REACH + BALL_RADIUS):
+        dirx, diry = unit_vec(math.cos(rad), math.sin(rad))
+        ball['vx'] += dirx * KICK_POWER
+        ball['vy'] += diry * KICK_POWER
+        ball['vz'] += FLY_LIFT_SMALL
+        cap_ball_speed()
+        return True
+    return False
+def try_long_shot():
+    rad = math.radians(player_angle + 90)
+    foot_x = player_x + math.cos(rad) * (BODY_WIDTH * 0.9 + 6.0)
+    foot_y = player_y + math.sin(rad) * (BODY_WIDTH * 0.9 + 6.0)
+    d = dist2d(foot_x, foot_y, ball['x'], ball['y'])
+    if d <= (KICK_REACH + BALL_RADIUS):
+        dirx, diry = unit_vec(math.cos(rad), math.sin(rad))
+        ball['vx'] += dirx * (KICK_POWER * 1.9)  
+        ball['vy'] += diry * (KICK_POWER * 1.9)
+        ball['vz'] += LONG_SHOT_LIFT
+        cap_ball_speed()
+        return True
+    return False
 def update_goalkeeper_xy(p, ball): 
    
 
@@ -60,6 +93,51 @@ def update_goalkeeper_xy(p, ball):
     if dx*dx + dy*dy > 1e-6:
         p['angle'] = math.degrees(math.atan2(dy, dx)) - 90
 
+def update_ball():
+    # integrate & friction
+    ball['x'] += ball['vx']
+    ball['y'] += ball['vy']
+    ball['vx'] *= BALL_FRICTION
+    ball['vy'] *= BALL_FRICTION
+    if abs(ball['vx']) < 0.01: ball['vx'] = 0.0
+    if abs(ball['vy']) < 0.01: ball['vy'] = 0.0
+
+    # bounce on X edges
+    if ball['x'] < -GRID_LENGTH:
+        ball['x'] = -GRID_LENGTH
+        ball['vx'] = -ball['vx'] * 0.7
+    elif ball['x'] > GRID_LENGTH:
+        ball['x'] = GRID_LENGTH
+        ball['vx'] = -ball['vx'] * 0.7
+
+    # check goals at Y edges
+    global player_score, ai_score
+    if ball['y'] > GRID_LENGTH:
+        if abs(ball['x']) <= GOAL_MOUTH/2:
+            player_score += 1
+            reset_ball()
+        else:
+            ball['y'] = GRID_LENGTH
+            ball['vy'] = -ball['vy'] * 0.7
+    elif ball['y'] < -GRID_LENGTH:
+        if abs(ball['x']) <= GOAL_MOUTH/2:
+            ai_score += 1
+            reset_ball()
+        else:
+            ball['y'] = -GRID_LENGTH
+    
+            ball['vy'] = -ball['vy'] * 0.7
+    ball['z'] += ball['vz']
+    ball['vz'] += GRAVITY_Z
+    if ball['z'] > BALL_RADIUS + 0.01:
+        ball['vx'] *= AIR_DRAG
+        ball['vy'] *= AIR_DRAG
+    if ball['z'] < BALL_RADIUS:
+        ball['z']  = BALL_RADIUS
+        if ball['vz'] < 0.0:
+            ball['vz'] = -ball['vz'] * BOUNCE_Z
+            if abs(ball['vz']) < 0.15:
+                ball['vz'] = 0.0
 def GG3D_Penalty(cmd=None, **kw):
    
     S = GG3D_Penalty.__dict__.setdefault('_S', {
@@ -318,15 +396,18 @@ def GG3D_SprintEnergy(cmd=None, **kw):
         return dict(S)
 
 
-
 def keyboardListener(key, x, y):
-    global player_x, player_y, player_angle, game_over, player_score, ai_score, match_start_ms, first_person, topdown_view
+    global player_x, player_y, player_angle, game_over, player_score, ai_score
+    global match_start_ms, first_person, topdown_view
+
     move_step  = 10 * PLAYER_SCALE
     angle_step = 6
 
     raw = key.decode("utf-8")
     k   = raw.lower()
+    now_ms = glutGet(GLUT_ELAPSED_TIME)
 
+    # ---------- Penalty Controls ----------
     if k == 'p':
         shooter = next((pp for pp in my_team if pp.get('is_user', False) and not pp.get('is_keeper', False)), None)
         if shooter is None:
@@ -348,8 +429,9 @@ def keyboardListener(key, x, y):
         if k in ('w','a','s','d','q','e'):
             glutPostRedisplay()
             return
+   
 
-    if k == '\x1b':
+    if k == '\x1b': 
         try: glutLeaveMainLoop()
         except: pass
         return
@@ -361,8 +443,10 @@ def keyboardListener(key, x, y):
         match_start_ms = glutGet(GLUT_ELAPSED_TIME)
         return
 
-    if game_over: return
+    if game_over: 
+        return
 
+    
     _sprint_now = raw.isalpha() and raw.isupper()
 
     if k == 't':
@@ -395,8 +479,10 @@ def keyboardListener(key, x, y):
         player_x += math.cos(rad) * (move_step * mult)
         player_y += math.sin(rad) * (move_step * mult)
     elif k == ' ':
-        try_kick(True)
-
+        try_kick(True)   # normal kick
+    elif k == 'l':
+        if not try_fly_chip():
+            pass 
     player_x_clamped = clamp(player_x, -GRID_LENGTH, GRID_LENGTH)
     player_y_clamped = clamp(player_y, -GRID_LENGTH, GRID_LENGTH)
     for p in my_team:
@@ -405,8 +491,5 @@ def keyboardListener(key, x, y):
             p['angle'] = player_angle
     globals()['player_x'] = player_x_clamped
     globals()['player_y'] = player_y_clamped
+
     glutPostRedisplay()
-
-
-
-
