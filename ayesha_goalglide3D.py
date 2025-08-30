@@ -3,7 +3,8 @@ BOUNCE_Z       = 0.40
 AIR_DRAG       = 0.995
 FLY_LIFT_SMALL = 9.5      
 LONG_SHOT_LIFT = 8.0   
-
+LONG_SHOT_MSG_MS = 700
+long_shot_msg_until = -1
 
 ball = {'x': 0.0, 'y': 0.0, 'z': BALL_RADIUS, 'vx': 0.0, 'vy': 0.0, 'vz': 0.0}
 
@@ -17,12 +18,20 @@ def draw_hud():
 
     GG3D_SprintEnergy('draw', draw_text=draw_text, x=10, y=WINDOW_HEIGHT-100)
     GG3D_Penalty('draw_hud', draw_text=draw_text, x=10, y=80)
+    GG3D_DrawLongShotBanner(draw_text, x=10, y=120)
+
 
     if game_over:
         winner = "You Win!" if player_score > ai_score else ("Draw!" if player_score == ai_score else "AI Wins!")
         draw_text(WINDOW_WIDTH//2 - 60, WINDOW_HEIGHT//2 + 20, "GAME OVER")
         draw_text(WINDOW_WIDTH//2 - 60, WINDOW_HEIGHT//2 - 4, winner)
         draw_text(WINDOW_WIDTH//2 - 120, WINDOW_HEIGHT//2 - 28, "Press R to Restart")
+def GG3D_DrawLongShotBanner(draw_text, x=10, y=120):
+    now = glutGet(GLUT_ELAPSED_TIME)
+    if now < globals().get('long_shot_msg_until', -1):
+        draw_text(x, y, "🔥 LONG SHOT!")
+
+
 def try_fly_chip():
     rad = math.radians(player_angle + 90)
     foot_x = player_x + math.cos(rad) * (BODY_WIDTH * 0.9 + 6.0)
@@ -398,8 +407,7 @@ def GG3D_SprintEnergy(cmd=None, **kw):
 
 def keyboardListener(key, x, y):
     global player_x, player_y, player_angle, game_over, player_score, ai_score
-    global match_start_ms, first_person, topdown_view
-
+    global match_start_ms, first_person, topdown_view, long_shot_msg_until
     move_step  = 10 * PLAYER_SCALE
     angle_step = 6
 
@@ -407,7 +415,7 @@ def keyboardListener(key, x, y):
     k   = raw.lower()
     now_ms = glutGet(GLUT_ELAPSED_TIME)
 
-    # ---------- Penalty Controls ----------
+    # Penalty Controls
     if k == 'p':
         shooter = next((pp for pp in my_team if pp.get('is_user', False) and not pp.get('is_keeper', False)), None)
         if shooter is None:
@@ -429,9 +437,8 @@ def keyboardListener(key, x, y):
         if k in ('w','a','s','d','q','e'):
             glutPostRedisplay()
             return
-   
 
-    if k == '\x1b': 
+    if k == '\x1b':  # ESC
         try: glutLeaveMainLoop()
         except: pass
         return
@@ -443,16 +450,18 @@ def keyboardListener(key, x, y):
         match_start_ms = glutGet(GLUT_ELAPSED_TIME)
         return
 
-    if game_over: 
-        return
+    if game_over: return
 
-    
     _sprint_now = raw.isalpha() and raw.isupper()
 
     if k == 't':
         topdown_view = not topdown_view
     elif k == 'c':
         pass
+    elif k == 'l':  
+        globals()['long_shot_msg_until'] = glutGet(GLUT_ELAPSED_TIME) + LONG_SHOT_MSG_MS
+        if not try_long_shot(): 
+            pass
     elif k == 'w':
         mult = GG3D_SprintEnergy('maybe_scale', want_sprint=_sprint_now)
         rad = math.radians(player_angle + 90)
@@ -479,10 +488,7 @@ def keyboardListener(key, x, y):
         player_x += math.cos(rad) * (move_step * mult)
         player_y += math.sin(rad) * (move_step * mult)
     elif k == ' ':
-        try_kick(True)   # normal kick
-    elif k == 'l':
-        if not try_fly_chip():
-            pass 
+        try_kick(True)   
     player_x_clamped = clamp(player_x, -GRID_LENGTH, GRID_LENGTH)
     player_y_clamped = clamp(player_y, -GRID_LENGTH, GRID_LENGTH)
     for p in my_team:
@@ -491,5 +497,6 @@ def keyboardListener(key, x, y):
             p['angle'] = player_angle
     globals()['player_x'] = player_x_clamped
     globals()['player_y'] = player_y_clamped
-
     glutPostRedisplay()
+
+
