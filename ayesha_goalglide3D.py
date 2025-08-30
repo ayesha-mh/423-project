@@ -379,7 +379,8 @@ def GG3D_SprintEnergy(cmd=None, **kw):
         if S['sprinting']:
             S['energy'] -= S['DRAIN_RATE']
         else:
-            S['energy'] += S['REGEN_RATE']
+            if S['energy'] < 100.0:
+                S['energy'] += S['REGEN_RATE']
         if S['energy'] <= 0.0:
             S['energy'] = 0.0
             S['sprinting'] = False
@@ -405,9 +406,11 @@ def GG3D_SprintEnergy(cmd=None, **kw):
         return dict(S)
 
 
+is_shift_pressed = False
+
 def keyboardListener(key, x, y):
     global player_x, player_y, player_angle, game_over, player_score, ai_score
-    global match_start_ms, first_person, topdown_view, long_shot_msg_until
+    global match_start_ms, first_person, topdown_view, long_shot_msg_until, is_shift_pressed
     move_step  = 10 * PLAYER_SCALE
     angle_step = 6
 
@@ -415,7 +418,6 @@ def keyboardListener(key, x, y):
     k   = raw.lower()
     now_ms = glutGet(GLUT_ELAPSED_TIME)
 
-    # Penalty Controls
     if k == 'p':
         shooter = next((pp for pp in my_team if pp.get('is_user', False) and not pp.get('is_keeper', False)), None)
         if shooter is None:
@@ -438,7 +440,7 @@ def keyboardListener(key, x, y):
             glutPostRedisplay()
             return
 
-    if k == '\x1b':  # ESC
+    if k == '\x1b':
         try: glutLeaveMainLoop()
         except: pass
         return
@@ -458,7 +460,7 @@ def keyboardListener(key, x, y):
         topdown_view = not topdown_view
     elif k == 'c':
         pass
-    elif k == 'l':  
+    elif k == 'l':
         globals()['long_shot_msg_until'] = glutGet(GLUT_ELAPSED_TIME) + LONG_SHOT_MSG_MS
         if not try_long_shot(): 
             pass
@@ -488,7 +490,17 @@ def keyboardListener(key, x, y):
         player_x += math.cos(rad) * (move_step * mult)
         player_y += math.sin(rad) * (move_step * mult)
     elif k == ' ':
-        try_kick(True)   
+        try_kick(True)
+
+    if key == b'shift' and not is_shift_pressed:
+        is_shift_pressed = True
+        GG3D_SprintEnergy('maybe_scale', want_sprint=True)
+
+    if key == b'shift' and is_shift_pressed:
+        is_shift_pressed = False
+        GG3D_SprintEnergy('maybe_scale', want_sprint=False)
+        GG3D_SprintEnergy('tick')
+
     player_x_clamped = clamp(player_x, -GRID_LENGTH, GRID_LENGTH)
     player_y_clamped = clamp(player_y, -GRID_LENGTH, GRID_LENGTH)
     for p in my_team:
@@ -497,6 +509,9 @@ def keyboardListener(key, x, y):
             p['angle'] = player_angle
     globals()['player_x'] = player_x_clamped
     globals()['player_y'] = player_y_clamped
+
     glutPostRedisplay()
+
+
 
 
