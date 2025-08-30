@@ -291,6 +291,325 @@ def main():
     init_weather()
     
     glutDisplayFunc(display)
+from OpenGL.GL import *
+from OpenGL.GLUT import *
+from OpenGL.GLU import *
+import math
+import random
+
+# =======================
+# WINDOW SETTINGS
+# =======================
+WINDOW_WIDTH = 1000
+WINDOW_HEIGHT = 800
+
+# =======================
+# FIELD SETTINGS
+# =======================
+FIELD_LENGTH = 800
+FIELD_WIDTH = 500
+CENTER_CIRCLE_RADIUS = 60
+GOAL_WIDTH = 200
+GOAL_DEPTH = 60
+GOAL_MOUTH = GOAL_WIDTH
+
+# =======================
+# PLAYER SETTINGS
+# =======================
+player_x, player_y = 0, 0
+player_angle = 0
+PLAYER_SPEED = 7
+
+# Humanoid proportions
+BODY_WIDTH = 25
+BODY_HEIGHT = 45
+HEAD_RADIUS = 10
+ARM_LENGTH = 30
+LEG_LENGTH = 35
+
+# =======================
+# BALL SETTINGS
+# =======================
+BALL_RADIUS = 10
+ball = {'x': 0.0, 'y': 0.0, 'z': BALL_RADIUS, 'vx': 0.0, 'vy': 0.0, 'vz': 0.0}
+BALL_FRICTION = 0.985
+GRAVITY_Z = -0.2
+BOUNCE_Z = 0.6
+AIR_DRAG = 0.995
+
+# =======================
+# GAME STATE & SCORING
+# =======================
+player_score = 0
+ai_score = 0
+game_over = False
+match_ms = 60000
+match_start_ms = 0
+
+# =======================================
+# my part: GLOBAL STATES
+# =======================================
+iscelebrating = False
+animationlimbingles = {
+    'left_arm': 0, 'right_arm': 0,
+    'left_leg': 0, 'right_leg': 0
+}
+isday = True
+israining = False
+
+# My change: Variables for the Interactive Replay Camera feature
+isinreplay = False
+replaytimer = 0
+replaycameraangle = 1
+# END
+
+# =======================================
+# my features
+# =======================================
+RAINPARTICLES = 150
+rainpositions = []
+weatherinitialized = False
+
+def getcolorformode(daycolor, nightcolor):
+    if isday == True:
+        return daycolor
+    else:
+        return nightcolor
+
+def initweather():
+    global rainpositions, weatherinitialized
+    if weatherinitialized == False:
+        for i in range(RAINPARTICLES):
+            x = random.uniform(-FIELD_LENGTH / 2, FIELD_LENGTH / 2)
+            y = random.uniform(-FIELD_WIDTH / 2, FIELD_WIDTH / 2)
+            z = random.uniform(50.0, 300.0)
+            rainpositions.append([x, y, z])
+        weatherinitialized = True
+
+def weather(command):
+    global isday, israining
+    if command == 'draw' and israining:
+        glColor3f(0.7, 0.8, 0.9)
+        glBegin(GL_LINES)
+        for x, y, z in rainpositions:
+            glVertex3f(x, y, z)
+            glVertex3f(x, y, z - 5.0) # Raindrop length
+        glEnd()
+
+    elif command == 'update' and israining:
+        for i in range(len(rainpositions)):
+            rainpositions[i][2] -= 4.0 # Rain fall speed
+            if rainpositions[i][2] < 0:
+                rainpositions[i][0] = random.uniform(-FIELD_LENGTH / 2, FIELD_LENGTH / 2)
+                rainpositions[i][1] = random.uniform(-FIELD_WIDTH / 2, FIELD_WIDTH / 2)
+                rainpositions[i][2] = 300.0
+
+    elif command == 'toggle_day_night':
+        isday = not isday
+    elif command == 'toggle_rain':
+        israining = not israining
+
+celebrationtimer = 0
+MAXCELEBRATIONTIME = 200
+animationphase = 0.0
+
+def celebration(command, limbanglesin=None):
+    global celebrationtimer, animationphase
+    limbanglesout = limbanglesin if limbanglesin is not None else {}
+
+    if command == 'start':
+        celebrationtimer = MAXCELEBRATIONTIME
+        animationphase = 0.0
+        return True # Start celebrating
+
+    elif command == 'update':
+        if celebrationtimer > 0:
+            celebrationtimer -= 1
+            animationphase += 0.20
+            swing_angle = math.sin(animationphase) * 55
+            
+            limbanglesout['left_arm'] = swing_angle
+            limbanglesout['right_arm'] = -swing_angle
+            limbanglesout['left_leg'] = -swing_angle
+            limbanglesout['right_leg'] = swing_angle
+            return True, limbanglesout
+        else:
+            limbanglesout = {k: 0 for k in limbanglesout}
+            return False, limbanglesout
+
+# My change: Add the new function for the replay camera
+def setreplaycamera():
+    """Sets the camera view based on the selected replaycameraangle."""
+    if replaycameraangle == 1:
+        # Angle 1: Behind the goal
+        gluLookAt(ball['x'], ball['y'] - 50, 20, ball['x'], ball['y'], ball['z'], 0, 0, 1)
+    elif replaycameraangle == 2:
+        # Angle 2: Side view of the player
+        gluLookAt(player_x + 100, player_y, 50, player_x, player_y, 50, 0, 0, 1)
+    elif replaycameraangle == 3:
+        # Angle 3: High, top-down tactical view
+        gluLookAt(0, 0, 800, 0, 0, 0, 0, 1, 0)
+
+# =======================
+# Teammates code
+# =======================
+def draw_field():
+    field_color = getcolorformode((0.0, 0.5, 0.1), (0.0, 0.2, 0.05))
+    glColor3f(*field_color)
+    glBegin(GL_QUADS); glVertex3f(-FIELD_LENGTH/2, -FIELD_WIDTH/2, 0); glVertex3f(FIELD_LENGTH/2, -FIELD_WIDTH/2, 0); glVertex3f(FIELD_LENGTH/2, FIELD_WIDTH/2, 0); glVertex3f(-FIELD_LENGTH/2, FIELD_WIDTH/2, 0); glEnd()
+    
+    line_color = getcolorformode((1.0, 1.0, 1.0), (0.6, 0.6, 0.6))
+    glColor3f(*line_color)
+    glLineWidth(2.0)
+    glBegin(GL_LINE_LOOP); glVertex3f(-FIELD_LENGTH/2, -FIELD_WIDTH/2, 0.1); glVertex3f(FIELD_LENGTH/2, -FIELD_WIDTH/2, 0.1); glVertex3f(FIELD_LENGTH/2, FIELD_WIDTH/2, 0.1); glVertex3f(-FIELD_LENGTH/2, FIELD_WIDTH/2, 0.1); glEnd()
+    glBegin(GL_LINES); glVertex3f(0, -FIELD_WIDTH/2, 0.1); glVertex3f(0, FIELD_WIDTH/2, 0.1); glEnd()
+    glPushMatrix(); glTranslatef(0, 0, 0.1); glBegin(GL_LINE_LOOP); [glVertex3f(math.cos(2*math.pi*i/100)*CENTER_CIRCLE_RADIUS, math.sin(2*math.pi*i/100)*CENTER_CIRCLE_RADIUS, 0) for i in range(100)]; glEnd(); glPopMatrix()
+    def draw_goal(xpos): glBegin(GL_LINE_LOOP); glVertex3f(xpos, -GOAL_WIDTH/2, 0.1); glVertex3f(xpos, GOAL_WIDTH/2, 0.1); glVertex3f(xpos + math.copysign(GOAL_DEPTH, xpos), GOAL_WIDTH/2, 0.1); glVertex3f(xpos + math.copysign(GOAL_DEPTH, xpos), -GOAL_WIDTH/2, 0.1); glEnd()
+    draw_goal(-FIELD_LENGTH/2); draw_goal(FIELD_LENGTH/2)
+    glLineWidth(1.0)
+
+def draw_player(x, y, angle, team_color=(0, 0, 1), limb_angles=None):
+    if limb_angles is None: limb_angles = {'left_arm': 0, 'right_arm': 0, 'left_leg': 0, 'right_leg': 0}
+    glPushMatrix()
+    glTranslatef(x, y, LEG_LENGTH + (BODY_HEIGHT/2))
+    glRotatef(angle, 0, 0, 1)
+
+    body_day_color = team_color
+    body_night_color = (team_color[0]*0.4, team_color[1]*0.4, team_color[2]*0.4)
+    glColor3f(*getcolorformode(body_day_color, body_night_color))
+    glPushMatrix(); glScalef(BODY_WIDTH/50, BODY_WIDTH/50, BODY_HEIGHT/50); glutSolidCube(50); glPopMatrix()
+
+    head_day_color = (1, 0.8, 0.6)
+    head_night_color = (0.6, 0.48, 0.36)
+    glColor3f(*getcolorformode(head_day_color, head_night_color))
+    glPushMatrix(); glTranslatef(0, 0, BODY_HEIGHT/2 + HEAD_RADIUS); glutSolidSphere(HEAD_RADIUS, 20, 20); glPopMatrix()
+
+    glColor3f(*getcolorformode(body_day_color, body_night_color))
+    glPushMatrix(); glTranslatef(BODY_WIDTH/2, 0, BODY_HEIGHT/2 * 0.8); glRotatef(limb_angles['right_arm'], 1, 0, 0); glTranslatef(0, 0, -ARM_LENGTH/2); glScalef(0.2, 0.2, 1.0); glutSolidCube(ARM_LENGTH); glPopMatrix()
+    glPushMatrix(); glTranslatef(-BODY_WIDTH/2, 0, BODY_HEIGHT/2 * 0.8); glRotatef(limb_angles['left_arm'], 1, 0, 0); glTranslatef(0, 0, -ARM_LENGTH/2); glScalef(0.2, 0.2, 1.0); glutSolidCube(ARM_LENGTH); glPopMatrix()
+
+    shorts_day_color = (0.2, 0.2, 0.5)
+    shorts_night_color = (0.1, 0.1, 0.25)
+    glColor3f(*getcolorformode(shorts_day_color, shorts_night_color))
+    glPushMatrix(); glTranslatef(BODY_WIDTH/4, 0, -BODY_HEIGHT/2); glRotatef(limb_angles['right_leg'], 1, 0, 0); glTranslatef(0, 0, -LEG_LENGTH/2); glScalef(0.3, 0.3, 1.0); glutSolidCube(LEG_LENGTH); glPopMatrix()
+    glPushMatrix(); glTranslatef(-BODY_WIDTH/4, 0, -BODY_HEIGHT/2); glRotatef(limb_angles['left_leg'], 1, 0, 0); glTranslatef(0, 0, -LEG_LENGTH/2); glScalef(0.3, 0.3, 1.0); glutSolidCube(LEG_LENGTH); glPopMatrix()
+
+    glPopMatrix()
+
+def draw_ball():
+    ball_color = getcolorformode((1.0, 1.0, 1.0), (0.7, 0.7, 0.7))
+    glColor3f(*ball_color)
+    glPushMatrix()
+    glTranslatef(ball['x'], ball['y'], ball['z'])
+    glutSolidSphere(BALL_RADIUS, 20, 20)
+    glPopMatrix()
+
+def update_ball():
+    global player_score, ai_score, iscelebrating, isinreplay, replaytimer, replaycameraangle
+    
+    if iscelebrating or isinreplay: return
+    
+    ball['x'] += ball['vx']; ball['y'] += ball['vy']; ball['z'] += ball['vz']
+    ball['vx'] *= BALL_FRICTION; ball['vy'] *= BALL_FRICTION
+    ball['vz'] += GRAVITY_Z
+    if ball['z'] > BALL_RADIUS: ball['vx'] *= AIR_DRAG; ball['vy'] *= AIR_DRAG
+    else: ball['z'] = BALL_RADIUS; ball['vz'] = -ball['vz'] * BOUNCE_Z
+    if abs(ball['x']) > FIELD_LENGTH/2: ball['vx'] *= -0.7; ball['x'] = math.copysign(FIELD_LENGTH/2, ball['x'])
+    
+    is_goal = abs(ball['x']) < GOAL_MOUTH/2
+    if ball['y'] > FIELD_WIDTH/2:
+        if is_goal:
+            player_score += 1
+            iscelebrating = celebration('start')
+            isinreplay = True
+            replaytimer = 300
+            replaycameraangle = 1
+            reset_ball()
+        else: ball['vy'] *= -0.7; ball['y'] = FIELD_WIDTH/2
+    elif ball['y'] < -FIELD_WIDTH/2:
+        if is_goal: ai_score += 1; reset_ball()
+        else: ball['vy'] *= -0.7; ball['y'] = -FIELD_WIDTH/2
+
+def reset_ball():
+    ball.update({'x': 0, 'y': 0, 'z': BALL_RADIUS, 'vx': 0, 'vy': 0, 'vz': 0})
+    
+def keyboardListener(key, x, y):
+    global player_x, player_y, player_angle, replaycameraangle, isinreplay
+    
+    try: k = key.decode().lower()
+    except: return
+
+    if isinreplay:
+        if k == '1': replaycameraangle = 1
+        elif k == '2': replaycameraangle = 2
+        elif k == '3': replaycameraangle = 3
+        return
+
+    if k == 'n': weather('toggle_day_night')
+    if k == 'm': weather('toggle_rain')
+
+    if iscelebrating: return
+
+    move_rad = math.radians(player_angle + 90)
+    if k == 'w': player_x += math.cos(move_rad) * PLAYER_SPEED; player_y += math.sin(move_rad) * PLAYER_SPEED
+    if k == 's': player_x -= math.cos(move_rad) * PLAYER_SPEED; player_y -= math.sin(move_rad) * PLAYER_SPEED
+    if k == 'a': player_angle += 10
+    if k == 'd': player_angle -= 10
+    if k == ' ':
+        dx, dy = ball['x'] - player_x, ball['y'] - player_y
+        if dx*dx + dy*dy < (50*50):
+            ball['vx'] += math.cos(move_rad) * 10
+            ball['vy'] += math.sin(move_rad) * 10
+            ball['vz'] = 2.0
+
+def idle_update():
+    global iscelebrating, animationlimbingles, isinreplay, replaytimer
+    
+    weather('update')
+    if iscelebrating:
+        iscelebrating, animationlimbingles = celebration('update', animationlimbingles)
+    
+    if isinreplay:
+        replaytimer -= 1
+        if replaytimer <= 0:
+            isinreplay = False
+
+    if not game_over:
+      update_ball()
+      
+    glutPostRedisplay()
+
+def display():
+    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT)
+    glLoadIdentity()
+    
+    if isinreplay:
+        setreplaycamera()
+    else:
+        gluLookAt(0, -FIELD_WIDTH*1.5, 600, 0, 0, 0, 0, 0, 1)
+
+    draw_field()
+    weather('draw')
+    draw_player(player_x, player_y, player_angle, limb_angles=animationlimbingles)
+    draw_ball()
+
+    glutSwapBuffers()
+
+def main():
+    glutInit()
+    glutInitDisplayMode(GLUT_DOUBLE | GLUT_RGB | GLUT_DEPTH)
+    glutInitWindowSize(WINDOW_WIDTH, WINDOW_HEIGHT)
+    glutCreateWindow(b"GoalGlide 3D - Group 08")
+    glEnable(GL_DEPTH_TEST)
+    initweather()
+    glutDisplayFunc(display)
+    glutKeyboardFunc(keyboardListener)
+    glutIdleFunc(idle_update)
+    reset_ball()
+    glutMainLoop()
+
+if __name__ == "__main__":
+    main()
     glutKeyboardFunc(keyboardListener)
     glutIdleFunc(idle_update)
 
