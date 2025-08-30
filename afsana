@@ -1,0 +1,301 @@
+from OpenGL.GL import *
+from OpenGL.GLUT import *
+from OpenGL.GLU import *
+import math
+import random
+
+
+
+
+# WINDOW SETTINGS
+WINDOW_WIDTH = 1000
+WINDOW_HEIGHT = 800
+
+
+# FIELD SETTINGS
+FIELD_LENGTH = 800
+FIELD_WIDTH = 500
+CENTER_CIRCLE_RADIUS = 60
+GOAL_WIDTH = 200
+GOAL_DEPTH = 60
+GOAL_MOUTH = GOAL_WIDTH
+
+
+# PLAYER SETTINGS
+player_x, player_y = 0, 0
+player_angle = 0
+PLAYER_SPEED = 7
+
+# Humanoid proportions
+BODY_WIDTH = 25
+BODY_HEIGHT = 45
+HEAD_RADIUS = 10
+ARM_LENGTH = 30
+LEG_LENGTH = 35
+
+
+# BALL SETTINGS
+BALL_RADIUS = 10
+ball = {'x': 0.0, 'y': 0.0, 'z': BALL_RADIUS, 'vx': 0.0, 'vy': 0.0, 'vz': 0.0}
+BALL_FRICTION = 0.985
+GRAVITY_Z = -0.2
+BOUNCE_Z = 0.6
+AIR_DRAG = 0.995
+
+
+# GAME STATE & SCORING
+player_score = 0
+ai_score = 0
+game_over = False
+match_ms = 60000
+match_start_ms = 0
+
+
+# my part
+is_celebrating = False
+animation_limb_angles = {
+    'left_arm': 0, 'right_arm': 0,
+    'left_leg': 0, 'right_leg': 0
+}
+is_day = True
+is_raining = False
+#END
+
+
+# my features
+RAIN_PARTICLES = 150
+rain_positions = []
+_weather_initialized = False
+
+def _get_color_for_mode(day_color, night_color):
+    if is_day == True:
+        return day_color
+    else:
+        return night_color
+
+def init_weather():
+    global rain_positions, _weather_initialized
+    if _weather_initialized == False:
+        for i in range(RAIN_PARTICLES):
+            x = random.uniform(-FIELD_LENGTH / 2, FIELD_LENGTH / 2)
+            y = random.uniform(-FIELD_WIDTH / 2, FIELD_WIDTH / 2)
+            z = random.uniform(50.0, 300.0)
+            rain_positions.append([x, y, z])
+        _weather_initialized = True
+
+def weather(command):
+    global is_day, is_raining
+    if command == 'draw' and is_raining:
+        glColor3f(0.7, 0.8, 0.9)
+        glBegin(GL_LINES)
+        for x, y, z in rain_positions:
+            glVertex3f(x, y, z)
+            glVertex3f(x, y, z - 5.0) # Raindrop length
+        glEnd()
+
+    elif command == 'update' and is_raining:
+        for i in range(len(rain_positions)):
+            rain_positions[i][2] -= 4.0 # Rain fall speed
+            if rain_positions[i][2] < 0:
+                rain_positions[i][0] = random.uniform(-FIELD_LENGTH / 2, FIELD_LENGTH / 2)
+                rain_positions[i][1] = random.uniform(-FIELD_WIDTH / 2, FIELD_WIDTH / 2)
+                rain_positions[i][2] = 300.0
+
+    elif command == 'toggle_day_night':
+        is_day = not is_day
+    elif command == 'toggle_rain':
+        is_raining = not is_raining
+celebration_timer = 0
+MAX_CELEBRATION_TIME = 200
+animation_phase = 0.0
+
+def celebration(command, limb_angles_in=None):
+    global celebration_timer, animation_phase
+    limb_angles_out = limb_angles_in if limb_angles_in is not None else {}
+
+    if command == 'start':
+        celebration_timer = MAX_CELEBRATION_TIME
+        animation_phase = 0.0
+        return True # Start celebrating
+
+    elif command == 'update':
+        if celebration_timer > 0:
+            celebration_timer -= 1
+            animation_phase += 0.20
+            swing_angle = math.sin(animation_phase) * 55
+            
+            limb_angles_out['left_arm']   = swing_angle
+            limb_angles_out['right_arm']  = -swing_angle
+            limb_angles_out['left_leg']   = -swing_angle
+            limb_angles_out['right_leg']  = swing_angle
+            return True, limb_angles_out
+        else:
+            limb_angles_out = {k: 0 for k in limb_angles_out}
+            return False, limb_angles_out
+
+
+# Teammates code
+def draw_field():
+    # My change: Use the color helper for day/night effect on the field
+    field_color = _get_color_for_mode((0.0, 0.5, 0.1), (0.0, 0.2, 0.05))
+    glColor3f(*field_color)
+    glBegin(GL_QUADS)
+    glVertex3f(-FIELD_LENGTH/2, -FIELD_WIDTH/2, 0); glVertex3f(FIELD_LENGTH/2, -FIELD_WIDTH/2, 0)
+    glVertex3f(FIELD_LENGTH/2, FIELD_WIDTH/2, 0); glVertex3f(-FIELD_LENGTH/2, FIELD_WIDTH/2, 0)
+    glEnd()
+    
+    # My change: Use the color helper for day/night effect on the lines
+    line_color = _get_color_for_mode((1.0, 1.0, 1.0), (0.6, 0.6, 0.6))
+    glColor3f(*line_color)
+    glLineWidth(2.0)
+    # Boundary
+    glBegin(GL_LINE_LOOP); glVertex3f(-FIELD_LENGTH/2, -FIELD_WIDTH/2, 0.1); glVertex3f(FIELD_LENGTH/2, -FIELD_WIDTH/2, 0.1); glVertex3f(FIELD_LENGTH/2, FIELD_WIDTH/2, 0.1); glVertex3f(-FIELD_LENGTH/2, FIELD_WIDTH/2, 0.1); glEnd()
+    # Center line
+    glBegin(GL_LINES); glVertex3f(0, -FIELD_WIDTH/2, 0.1); glVertex3f(0, FIELD_WIDTH/2, 0.1); glEnd()
+    # Center circle
+    glPushMatrix(); glTranslatef(0, 0, 0.1); glBegin(GL_LINE_LOOP); segments=100; [glVertex3f(math.cos(2*math.pi*i/segments)*CENTER_CIRCLE_RADIUS, math.sin(2*math.pi*i/segments)*CENTER_CIRCLE_RADIUS, 0) for i in range(segments)]; glEnd(); glPopMatrix()
+    # Goals
+    def draw_goal(xpos):
+        glBegin(GL_LINE_LOOP); glVertex3f(xpos, -GOAL_WIDTH/2, 0.1); glVertex3f(xpos, GOAL_WIDTH/2, 0.1); glVertex3f(xpos + math.copysign(GOAL_DEPTH, xpos), GOAL_WIDTH/2, 0.1); glVertex3f(xpos + math.copysign(GOAL_DEPTH, xpos), -GOAL_WIDTH/2, 0.1); glEnd()
+    draw_goal(-FIELD_LENGTH/2); draw_goal(FIELD_LENGTH/2)
+    glLineWidth(1.0)
+
+def draw_player(x, y, angle, team_color=(0, 0, 1), limb_angles=None):
+    if limb_angles is None:
+        limb_angles = {'left_arm': 0, 'right_arm': 0, 'left_leg': 0, 'right_leg': 0}
+
+    glPushMatrix()
+    glTranslatef(x, y, LEG_LENGTH + (BODY_HEIGHT/2))
+    glRotatef(angle, 0, 0, 1)
+
+    # My change: Use the color helper for day/night effect on all player parts
+    # Body (Jersey)
+    body_day_color = team_color
+    body_night_color = (team_color[0]*0.4, team_color[1]*0.4, team_color[2]*0.4)
+    glColor3f(*_get_color_for_mode(body_day_color, body_night_color))
+    glPushMatrix(); glScalef(BODY_WIDTH/50, BODY_WIDTH/50, BODY_HEIGHT/50); glutSolidCube(50); glPopMatrix()
+
+    # Head
+    head_day_color = (1, 0.8, 0.6)
+    head_night_color = (0.6, 0.48, 0.36)
+    glColor3f(*_get_color_for_mode(head_day_color, head_night_color))
+    glPushMatrix(); glTranslatef(0, 0, BODY_HEIGHT/2 + HEAD_RADIUS); glutSolidSphere(HEAD_RADIUS, 20, 20); glPopMatrix()
+
+    # Arms
+    glColor3f(*_get_color_for_mode(body_day_color, body_night_color)) # Same color as jersey
+    glPushMatrix()
+    glTranslatef(BODY_WIDTH/2, 0, BODY_HEIGHT/2 * 0.8); glRotatef(limb_angles['right_arm'], 1, 0, 0); glTranslatef(0, 0, -ARM_LENGTH/2); glScalef(0.2, 0.2, 1.0); glutSolidCube(ARM_LENGTH); glPopMatrix()
+    glPushMatrix()
+    glTranslatef(-BODY_WIDTH/2, 0, BODY_HEIGHT/2 * 0.8); glRotatef(limb_angles['left_arm'], 1, 0, 0); glTranslatef(0, 0, -ARM_LENGTH/2); glScalef(0.2, 0.2, 1.0); glutSolidCube(ARM_LENGTH); glPopMatrix()
+
+    # Legs (Shorts)
+    shorts_day_color = (0.2, 0.2, 0.5)
+    shorts_night_color = (0.1, 0.1, 0.25)
+    glColor3f(*_get_color_for_mode(shorts_day_color, shorts_night_color))
+    glPushMatrix()
+    glTranslatef(BODY_WIDTH/4, 0, -BODY_HEIGHT/2); glRotatef(limb_angles['right_leg'], 1, 0, 0); glTranslatef(0, 0, -LEG_LENGTH/2); glScalef(0.3, 0.3, 1.0); glutSolidCube(LEG_LENGTH); glPopMatrix()
+    glPushMatrix()
+    glTranslatef(-BODY_WIDTH/4, 0, -BODY_HEIGHT/2); glRotatef(limb_angles['left_leg'], 1, 0, 0); glTranslatef(0, 0, -LEG_LENGTH/2); glScalef(0.3, 0.3, 1.0); glutSolidCube(LEG_LENGTH); glPopMatrix()
+
+    glPopMatrix()
+
+def draw_ball():
+    # My change: Use the color helper for day/night effect on the ball
+    ball_color = _get_color_for_mode((1.0, 1.0, 1.0), (0.7, 0.7, 0.7))
+    glColor3f(*ball_color)
+    glPushMatrix()
+    glTranslatef(ball['x'], ball['y'], ball['z'])
+    glutSolidSphere(BALL_RADIUS, 20, 20)
+    glPopMatrix()
+
+def update_ball():
+    global player_score, ai_score, is_celebrating
+    if is_celebrating: return # Pause ball movement during celebration
+    
+    ball['x'] += ball['vx']; ball['y'] += ball['vy']; ball['z'] += ball['vz']
+    ball['vx'] *= BALL_FRICTION; ball['vy'] *= BALL_FRICTION
+    ball['vz'] += GRAVITY_Z
+    
+    if ball['z'] > BALL_RADIUS: ball['vx'] *= AIR_DRAG; ball['vy'] *= AIR_DRAG
+    else: ball['z'] = BALL_RADIUS; ball['vz'] = -ball['vz'] * BOUNCE_Z
+        
+    if abs(ball['x']) > FIELD_LENGTH/2: ball['vx'] *= -0.7; ball['x'] = math.copysign(FIELD_LENGTH/2, ball['x'])
+    
+    is_goal = abs(ball['x']) < GOAL_MOUTH/2
+    if ball['y'] > FIELD_WIDTH/2:
+        if is_goal: player_score += 1; is_celebrating = celebration('start'); reset_ball()
+        else: ball['vy'] *= -0.7; ball['y'] = FIELD_WIDTH/2
+    elif ball['y'] < -FIELD_WIDTH/2:
+        if is_goal: ai_score += 1; reset_ball()
+        else: ball['vy'] *= -0.7; ball['y'] = -FIELD_WIDTH/2
+
+def reset_ball():
+    ball.update({'x': 0, 'y': 0, 'z': BALL_RADIUS, 'vx': 0, 'vy': 0, 'vz': 0})
+    
+def keyboardListener(key, x, y):
+    global player_x, player_y, player_angle
+    move_rad = math.radians(player_angle + 90)
+    
+    try: k = key.decode().lower()
+    except: return
+
+    if k == 'n': weather('toggle_day_night')
+    if k == 'm': weather('toggle_rain')
+
+    if is_celebrating: return # Disable player movement during celebration
+
+    if k == 'w': player_x += math.cos(move_rad) * PLAYER_SPEED; player_y += math.sin(move_rad) * PLAYER_SPEED
+    if k == 's': player_x -= math.cos(move_rad) * PLAYER_SPEED; player_y -= math.sin(move_rad) * PLAYER_SPEED
+    if k == 'a': player_angle += 10
+    if k == 'd': player_angle -= 10
+    if k == ' ': # Kick
+        dx, dy = ball['x'] - player_x, ball['y'] - player_y
+        if dx*dx + dy*dy < (50*50):
+            ball['vx'] += math.cos(move_rad) * 10
+            ball['vy'] += math.sin(move_rad) * 10
+            ball['vz'] = 2.0
+
+def idle_update():
+    global is_celebrating, animation_limb_angles
+    
+    weather('update')
+    if is_celebrating:
+        is_celebrating, animation_limb_angles = celebration('update', animation_limb_angles)
+    
+    if not game_over:
+      update_ball()
+      
+    glutPostRedisplay()
+
+def display():
+    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT)
+    glLoadIdentity()
+    
+    gluLookAt(0, -FIELD_WIDTH*1.5, 600, 0, 0, 0, 0, 0, 1)
+
+    draw_field()
+    weather('draw')
+    draw_player(player_x, player_y, player_angle, limb_angles=animation_limb_angles)
+    draw_ball()
+
+    glutSwapBuffers()
+
+def main():
+    glutInit()
+    glutInitDisplayMode(GLUT_DOUBLE | GLUT_RGB | GLUT_DEPTH)
+    glutInitWindowSize(WINDOW_WIDTH, WINDOW_HEIGHT)
+    glutCreateWindow(b"GoalGlide 3D - Group 08")
+
+    glEnable(GL_DEPTH_TEST) # Depth test is still needed for 3D
+    
+    init_weather()
+    
+    glutDisplayFunc(display)
+    glutKeyboardFunc(keyboardListener)
+    glutIdleFunc(idle_update)
+
+    reset_ball()
+    glutMainLoop()
+
+if __name__ == "__main__":
+    main()
