@@ -324,63 +324,99 @@ def GG3D_Penalty(cmd=None, **kw):
         m = math.hypot(x, y)
         return (x/m, y/m) if m > 1e-8 else (0.0, 0.0)
 
-    if cmd == 'active': return S['active']
+    if cmd == 'active':
+        return S['active']
+
     if cmd == 'end':
-        S['active']=False; S['waiting']=False; S['label']=None; S['label_timer']=0; S['penalty_count']=0; return
+        S['active'] = False
+        S['waiting'] = False
+        S['label'] = None
+        S['label_timer'] = 0
+        S['penalty_count'] = 0
+        return
 
     if cmd == 'start':
         b = kw['ball']; shooter = kw.get('shooter'); keeper = kw.get('keeper')
         GG3D_Possession('clear')
-        if S['penalty_count'] >= S['max_penalties']: S['penalty_count']=0
-        bx, by = 0.0, GRID_LENGTH - 180.0; gx, gy = 0.0, GRID_LENGTH - 60.0
+        if S['penalty_count'] >= S['max_penalties']:
+            S['penalty_count'] = 0
+        bx, by = 0.0, GRID_LENGTH - 180.0
+        gx, gy = 0.0, GRID_LENGTH - 60.0
         S['spot'], S['goal'] = (bx, by), (gx, gy)
-        b['x'], b['y'] = bx, by; b['vx']=b['vy']=0.0; b['z']=BALL_RADIUS
+        b['x'], b['y'] = bx, by
+        b['vx'] = b['vy'] = 0.0
+        b['z'] = BALL_RADIUS
+
         if shooter and not shooter.get('is_keeper', False):
-            shooter['x']=bx; shooter['y']=by - 28.0
-            shooter['angle']=math.degrees(math.atan2(gy - shooter['y'], gx - shooter['x'])) - 90
-            S['shooter_id']=id(shooter)
-        else: S['shooter_id']=None
+            shooter['x'] = bx
+            shooter['y'] = by - 28.0
+            shooter['angle'] = math.degrees(math.atan2(gy - shooter['y'], gx - shooter['x'])) - 90
+            S['shooter_id'] = id(shooter)
+        else:
+            S['shooter_id'] = None
+
         if keeper:
-            keeper['x']=0.0; keeper['y']=gy
-            keeper['angle']=math.degrees(math.atan2(by - keeper['y'], bx - keeper['x'])) - 90
-            S['keeper_id']=id(keeper)
-        else: S['keeper_id']=None
-        S['aim_phase']=0.0; S['aim_x']=bx
-        S['active']=True; S['waiting']=True; S['frame']=0
-        S['label']=f"PENALTY {S['penalty_count']+1}/{S['max_penalties']}: Tap SPACE to shoot"; S['label_timer']=120
+            keeper['x'] = 0.0
+            keeper['y'] = gy
+            keeper['angle'] = math.degrees(math.atan2(by - keeper['y'], bx - keeper['x'])) - 90
+            S['keeper_id'] = id(keeper)
+        else:
+            S['keeper_id'] = None
+
+        S['aim_phase'] = 0.0
+        S['aim_x'] = bx
+        S['active'] = True
+        S['waiting'] = True
+        S['frame'] = 0
+        S['label'] = "Tap SPACE to shoot"
+        S['label_timer'] = 120
         return
 
     if cmd == 'shoot':
-        if not S['active'] or not S['waiting']: return
-        b = kw['ball']; bx, by = S['spot']; gx, gy = S['goal']
+        if not S['active'] or not S['waiting']:
+            return
+        b = kw['ball']
+        bx, by = S['spot']
+        gx, gy = S['goal']
         aim_x = S.get('aim_x', gx)
         ux, uy = _unit(aim_x - bx, gy - by)
         SHOT_SPEED = 16.0
         b['x'], b['y'] = bx, by
         b['vx'], b['vy'] = ux * SHOT_SPEED, uy * SHOT_SPEED
         b['vz'] = 2.0
-        S['waiting'] = False; S['label']="Shot taken"; S['label_timer']=50; return
+        S['waiting'] = False
+        S['label'] = "Shot taken"
+        S['label_timer'] = 50
+        return
 
     if cmd == 'update':
         b = kw['ball']; mt = kw.get('my_team', my_team); et = kw.get('enemies', enemies)
-        if not S['active']: return False
+        if not S['active']:
+            return False
+
         S['frame'] += 1
         bx, by = S['spot']; gx, gy = S['goal']
 
+        # shooter sway / ball hold while waiting
         shooter = next((p for p in mt if id(p) == S['shooter_id']), None)
         if S['waiting'] and shooter:
             sway_limit = min(GOAL_MOUTH * 0.45, 80.0)
             S['aim_phase'] = (S['aim_phase'] + 0.055) % (math.pi * 2.0)
             target_x = bx + math.sin(S['aim_phase']) * sway_limit
             S['aim_x'] = clamp(target_x, bx - sway_limit, bx + sway_limit)
+
             ease = 0.20; max_step = 0.9
             dxs = (S['aim_x'] - shooter['x']) * ease
             if abs(dxs) > max_step: dxs = max_step if dxs > 0 else -max_step
             shooter['x'] = clamp(shooter['x'] + dxs, bx - sway_limit, bx + sway_limit)
             shooter['y'] = by - 28.0
             shooter['angle'] = math.degrees(math.atan2(gy - shooter['y'], gx - shooter['x'])) - 90
-            b['x'], b['y'] = bx, by; b['vx']=b['vy']=0.0; b['z']=BALL_RADIUS
 
+            b['x'], b['y'] = bx, by
+            b['vx'] = b['vy'] = 0.0
+            b['z'] = BALL_RADIUS
+
+        # keeper patrol/track and potential save
         keeper = next((p for p in et if id(p) == S['keeper_id']), None)
         if keeper:
             mouth = GOAL_MOUTH * 0.45
@@ -389,41 +425,75 @@ def GG3D_Penalty(cmd=None, **kw):
                 target_x = 0.6 * patrol + 0.4 * clamp(S['aim_x'], -mouth, mouth)
             else:
                 target_x = clamp(b['x'], -mouth, mouth)
+
             dist_to_line = max(0.0, gy - b['y'])
             target_y = gy - min(24.0, dist_to_line * 0.25)
             ease_x, ease_y = 0.18, 0.14; max_step = 0.85
-            dxk = (target_x - keeper['x']) * ease_x; dyk = (target_y - keeper['y']) * ease_y
+            dxk = (target_x - keeper['x']) * ease_x
+            dyk = (target_y - keeper['y']) * ease_y
             step_len = math.hypot(dxk, dyk)
             if step_len > max_step:
-                uxk, uyk = (dxk/step_len, dyk/step_len); dxk, dyk = uxk * max_step, uyk * max_step
+                uxk, uyk = dxk/step_len, dyk/step_len
+                dxk, dyk = uxk * max_step, uyk * max_step
+
             keeper['x'] = clamp(keeper['x'] + dxk, -mouth, mouth)
             keeper['y'] = clamp(keeper['y'] + dyk, gy - 24.0, gy)
+
             fx, fy = b['x'] - keeper['x'], b['y'] - keeper['y']
             if fx*fx + fy*fy > 1e-6:
                 keeper['angle'] = math.degrees(math.atan2(fy, fx)) - 90
+
             if not S['waiting']:
                 if math.hypot(fx, fy) < (BODY_WIDTH * 0.8 + BALL_RADIUS):
-                    b['vy'] = -abs(b['vy']) * 0.6; b['vx'] *= 0.6
+                    b['vy'] = -abs(b['vy']) * 0.6
+                    b['vx'] *= 0.6
                     cap_ball_speed()
-                    S['label'] = "SAVE!"; S['label_timer'] = 50
+                    S['label'] = "SAVE!"
+                    S['label_timer'] = 50
 
-        if not S['waiting'] and (abs(b['y']) > GRID_LENGTH - 10.0 or 
-                                 (S['label'] == "SAVE!" and S['label_timer'] <= 0)):
+        # detect end-of-attempt and progress the series
+        attempt_done = (not S['waiting']) and (
+            abs(b['y']) > GRID_LENGTH - 10.0 or
+            (S['label'] == "SAVE!" and S['label_timer'] <= 0)
+        )
+        if attempt_done:
             S['penalty_count'] += 1
+
+            # === INSTANT RESTART AFTER FINAL (NO 2–3s DELAY) ===
             if S['penalty_count'] >= S['max_penalties']:
-                S['active'] = False; S['waiting'] = False
-                S['label'] = f"Penalty sequence complete: {S['penalty_count']}/{S['max_penalties']}"; S['label_timer']=100
+                S['active'] = False
+                S['waiting'] = False
+                S['label'] = None
+                S['label_timer'] = 0
+
+                # Immediate reset using only functions already in 3.py
+                reset_ball()
+                GG3D_Possession('clear')
+                globals()['match_start_ms'] = glutGet(GLUT_ELAPSED_TIME)
+
+                # Optional but safe: ensure default 3rd-person camera
+                globals()['first_person'] = False
+                globals()['topdown_view'] = False
+                globals()['camera_angle'] = 45
+                globals()['camera_height'] = 600
+            # ====================================================
+
             else:
                 shooter = next((p for p in mt if id(p) == S['shooter_id']), None)
                 keeper  = next((p for p in et if id(p) == S['keeper_id']), None)
-                if shooter and keeper: GG3D_Penalty('start', ball=b, shooter=shooter, keeper=keeper)
+                if shooter and keeper:
+                    GG3D_Penalty('start', ball=b, shooter=shooter, keeper=keeper)
 
-        if S['label_timer'] > 0: S['label_timer'] -= 1
+        if S['label_timer'] > 0:
+            S['label_timer'] -= 1
+
         return True
 
     if cmd == 'draw_hud':
-        draw_text_fn = kw.get('draw_text'); x = kw.get('x', 10); y = kw.get('y', 80)
-        if not draw_text_fn: return
+        draw_text_fn = kw.get('draw_text')
+        x = kw.get('x', 10); y = kw.get('y', 80)
+        if not draw_text_fn:
+            return
         if S['active']:
             msg = S['label'] if (S['label'] and S['label_timer'] > 0) else f"PENALTY {S['penalty_count']+1}/{S['max_penalties']}"
             draw_text_fn(x, y, msg)
@@ -1276,4 +1346,5 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
