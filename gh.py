@@ -914,28 +914,100 @@ def _team_choose_single_chaser(team, exclude_keeper=True, exclude_user=False):
     return best
 
 def enemy_ai_update():
-    chaser = _team_choose_single_chaser(enemies, exclude_keeper=True, exclude_user=False)
+    now_ms   = glutGet(GLUT_ELAPSED_TIME)
+    holderId = GG3D_Possession('holder')
+
     for e in enemies:
-        dx = ball['x'] - e['x']; dy = ball['y'] - e['y']; d = math.hypot(dx, dy)
-        if d > 1e-6: e['angle'] = math.degrees(math.atan2(dy, dx)) - 90
+        dx, dy = ball['x'] - e['x'], ball['y'] - e['y']
+        d = math.hypot(dx, dy)
+        if d > 1e-6:
+            e['angle'] = math.degrees(math.atan2(dy, dx)) - 90
 
-        if e.get('is_keeper', False):
-            update_goalkeeper_xy(e, ball); continue
+        # -------------------- GK logic --------------------
+        if e.get('role') == 'GK':
+            catch_dist = BODY_WIDTH * 0.9 + BALL_RADIUS + 6.0
 
-        if e['force_return_frames'] > 0:
-            e['force_return_frames'] -= 1; _ret_home(e, rate=e['speed'] * 0.6); continue
+            # If GK currently holds the ball: hold for ~3s then pass
+            if holderId == id(e):
+                # park ball at GK feet during hold
+                ball['x'], ball['y'], ball['z'] = e['x'], e['y'], BALL_RADIUS
+                ball['vx'] = ball['vy'] = 0.0
 
-        if e is chaser:
-            _step_toward(e, ball['x'], ball['y'], e['speed'])
-            if d <= _contact_reach() and GG3D_Possession('can_take', player=e):
-                GG3D_Possession('set', player=e, duration_ms=3000)
-                e['has_ball'] = True
-            if e['has_ball'] and GG3D_Possession('holder') == id(e):
-                ux, uy = unit_vec(0.0 - ball['x'], (-GRID_LENGTH - 50.0) - ball['y'])
-                ball['vx'] += ux * (e['speed'] * 0.8); ball['vy'] += uy * (e['speed'] * 0.8)
+                # start/track hold timer
+                if 'gk_hold_start' not in e:
+                    e['gk_hold_start'] = now_ms
+
+                if now_ms - e['gk_hold_start'] >= 3000:
+                    # ---- choose target: nearest non-GK teammate, else safe outlet ----
+                    nearest, best = None, 1e9
+                    for mate in enemies:
+                        if mate is e or mate.get('role') == 'GK':
+                            continue
+                        dd = dist2d(mate['x'], mate['y'], e['x'], e['y'])
+                        if dd < best:
+                            best, nearest = dd, mate
+
+                    if nearest is None:
+                        tx = clamp(e['x'], -GOAL_MOUTH * 0.45, GOAL_MOUTH * 0.45)
+                        ty = GRID_LENGTH - 200.0
+                    else:
+                        tx, ty = nearest['x'], nearest['y']
+
+                    ux, uy = unit_vec(tx - e['x'], ty - e['y'])
+
+                    # 1) release lock BEFORE kick
+                    GG3D_Possession('clear')
+
+                    # 2) spawn ball a small step in front so GK can't re-catch this frame
+                    release_step = BODY_WIDTH * 0.6
+                    ball['x'] = e['x'] + ux * release_step
+                    ball['y'] = e['y'] + uy * release_step
+                    ball['z'] = BALL_RADIUS
+
+                    # 3) give it velocity and cap
+                    pass_speed = 18.0
+                    ball['vx'], ball['vy'] = ux * pass_speed, uy * pass_speed
+                    cap_ball_speed()
+
+                    # start brief re-catch cooldown on this GK
+                    e['gk_release_ms'] = now_ms
+                    e.pop('gk_hold_start', None)
+                    holderId = GG3D_Possession('holder')  # refresh cache
+                continue  # GK handled this frame
+
+            # If ball is close and GK is allowed to re-catch (no cooldown), claim it
+            can_recapture = True
+            if 'gk_release_ms' in e and (now_ms - e['gk_release_ms'] < 600):
+                can_recapture = False  # short cooldown to avoid instant re-catch
+
+            if can_recapture and d <= catch_dist and (holderId is None or holderId == id(e)):
+                GG3D_Possession('set', player=e, duration_ms=4000)
+                ball['x'], ball['y'], ball['z'] = e['x'], e['y'], BALL_RADIUS
+                ball['vx'] = ball['vy'] = 0.0
+                e['gk_hold_start'] = now_ms
+                holderId = id(e)
+                continue
+
+            # Otherwise: shade toward the ball to be ready
+            if d <= e['detect'] and not game_over:
+                ux, uy = unit_vec(dx, dy)
+                e['x'] += ux * (e['speed'] * 0.8)
+                e['y'] += uy * (e['speed'] * 0.8)
+            continue
+        # ------------------ end GK logic ------------------
+
+        # -------- normal enemy (non-GK) behavior ----------
+        if d <= e['detect'] and not game_over:
+            ux, uy = unit_vec(dx, dy)
+            e['x'] += ux * e['speed']
+            e['y'] += uy * e['speed']
+
+            if d <= (BODY_WIDTH * 0.9 + BALL_RADIUS + 6.0):
+                gx, gy = (0.0, -GRID_LENGTH - 50.0)
+                ux2, uy2 = unit_vec(gx - ball['x'], gy - ball['y'])
+                ball['vx'] += ux2 * e['speed'] * 22.0
+                ball['vy'] += uy2 * e['speed'] * 22.0
                 cap_ball_speed()
-        else:
-            _ret_home(e, rate=e['speed'] * 0.6)
 
 def my_team_update():
     chaser = _team_choose_single_chaser(my_team, exclude_keeper=True, exclude_user=True)
@@ -1365,6 +1437,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 
