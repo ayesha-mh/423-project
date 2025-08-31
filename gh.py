@@ -161,12 +161,12 @@ ball = {'x': 0.0, 'y': 0.0, 'z': BALL_RADIUS, 'vx': 0.0, 'vy': 0.0, 'vz': 0.0}
 BALL_FRICTION = 0.985
 BALL_MAX_SPEED = 30.0
 KICK_POWER = 28.0
-DRIBBLE_PUSH = 2.5
+DRIBBLE_PUSH = 4.5
 KICK_REACH = (BODY_WIDTH * 1.1) + 6.0
 
 # Dribble tuning to prevent over-push
 DRIBBLE_MIN_GAP = 7.0   # if ball is closer than this to your footprint, don't push
-DRIBBLE_MAX_SPEED = 7.0 # cap ball speed while dribbling nudges
+DRIBBLE_MAX_SPEED = 10.0 # cap ball speed while dribbling nudges
 
 # Goals and scoring
 GOAL_MOUTH = GRID_LENGTH * 0.6
@@ -1346,5 +1346,6 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
