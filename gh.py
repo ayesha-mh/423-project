@@ -1044,39 +1044,52 @@ def _kick_contact_ok_for_user():
 
 # ---- Dribble Nudge (REPLACE your version) ----------------
 def maybe_dribble_push(is_moving_forward):
-    """
-    Gentle nudge only when moving forward, only by the holder (you),
-    keeps a minimal gap so you can always shoot/pass cleanly.
-    """
+   
     if not is_moving_forward:
         return
+
     user = _user_player()
     if user is None:
         return
+
+    # only the holder may influence the ball
     holder = GG3D_Possession('holder')
     if holder is not None and holder != id(user):
-        return  # only the holder may influence the ball
-
-    # If ball already has decent pace, don't add more
-    if math.hypot(ball['vx'], ball['vy']) > DRIBBLE_MAX_SPEED:
         return
 
     rad = math.radians(player_angle + 90)
-    ahead_x = player_x + math.cos(rad) * (BODY_WIDTH * 1.1 + 6.0)
-    ahead_y = player_y + math.sin(rad) * (BODY_WIDTH * 1.1 + 6.0)
+    fx, fy = math.cos(rad), math.sin(rad)
+
+    ahead_x = player_x + fx * (BODY_WIDTH * 1.1 + 6.0)
+    ahead_y = player_y + fy * (BODY_WIDTH * 1.1 + 6.0)
     gap = dist2d(ahead_x, ahead_y, ball['x'], ball['y'])
 
-    # Keep a small gap; if it's too close, do NOT push (so kicks aren't blocked)
+    # keep a minimal gap (don't push if ball already too close)
     if gap <= DRIBBLE_MIN_GAP:
         return
 
-    # Small proportional nudge
-    push = min(DRIBBLE_PUSH * 0.45, max(0.08, (gap - DRIBBLE_MIN_GAP) * 0.06))
-    ball['vx'] += math.cos(rad) * push
-    ball['vy'] += math.sin(rad) * push
-    cap_ball_speed(DRIBBLE_MAX_SPEED)  # soft cap while dribbling
+    # measure distance behind/in front
+    relx, rely = ball['x'] - player_x, ball['y'] - player_y
+    forward_comp = relx * fx + rely * fy  # < 0 → ball behind
 
-    # Refresh short possession window to you
+    # base push
+    push = min(DRIBBLE_PUSH * 0.45,
+               max(0.08, (gap - DRIBBLE_MIN_GAP) * 0.06))
+
+    # if ball is behind or we're moving fast, increase push
+    if forward_comp < 0:
+        push *= 1.8
+    elif gap > (BODY_WIDTH * 2.0):
+        push *= 1.3
+
+    ball['vx'] += fx * push
+    ball['vy'] += fy * push
+
+    # allow a bit higher cap so sprinting doesn’t leave ball behind
+    local_cap = DRIBBLE_MAX_SPEED * 1.25
+    cap_ball_speed(local_cap)
+
+    # refresh short possession window
     GG3D_Possession('set', player=user, duration_ms=3000)
 
 # --------------------------
@@ -1346,6 +1359,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 
