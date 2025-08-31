@@ -1022,20 +1022,24 @@ def draw_hud():
     remaining = match_ms - (now - match_start_ms)
     draw_text(10, WINDOW_HEIGHT-28, f"Time: {max(0, remaining//1000)}s")
     draw_text(10, WINDOW_HEIGHT-52, f"Score You {player_score} : {ai_score} AI")
-    draw_text(10, WINDOW_HEIGHT-76, "Kick: SPACE | Long Shot: L | Move: WASD | RightClick: FPP | T: TopDown | R: Restart | C: Switch | P: Penalty | N: Day/Night | M: Rain")
-    GG3D_SprintEnergy('draw', draw_text=draw_text, x=10, y=WINDOW_HEIGHT-100)
-    GG3D_DrawLongShotBanner(draw_text, x=10, y=120)
+    draw_text(10, WINDOW_HEIGHT-76,
+              "Kick: SPACE | Long Shot: L | Move: WASD | RightClick: FPP | "
+              "T: TopDown | R: Restart | C: Switch | P: Penalty | N: Day/Night | M: Rain")
+    energy_y = WINDOW_HEIGHT - 100
+    GG3D_SprintEnergy('draw', draw_text=draw_text, x=10, y=energy_y)
     holder_id = GG3D_Possession('holder')
-    draw_text(10, WINDOW_HEIGHT-124, "Holder: " + ("None" if holder_id is None else "Locked"))
+    holder_text = "Holder: " + ("None" if holder_id is None else "Locked")
+    draw_text(10, energy_y - 60, holder_text)
+    GG3D_DrawLongShotBanner(draw_text, x=10, y=120)
     GG3D_Penalty('draw_hud', draw_text=draw_text, x=10, y=80)
-    if isinreplay:
+    if 'isinreplay' in globals() and isinreplay:
         draw_text(WINDOW_WIDTH//2 - 120, 40, "REPLAY MODE - Press 1, 2, 3")
-
     if game_over:
         winner = "You Win!" if player_score > ai_score else ("Draw!" if player_score == ai_score else "AI Wins!")
         draw_text(WINDOW_WIDTH//2 - 60, WINDOW_HEIGHT//2 + 20, "GAME OVER")
         draw_text(WINDOW_WIDTH//2 - 60, WINDOW_HEIGHT//2 - 4, winner)
         draw_text(WINDOW_WIDTH//2 - 120, WINDOW_HEIGHT//2 - 28, "Press R to Restart")
+
 
 # --------------------------
 # Camera setup & display
@@ -1272,3 +1276,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
