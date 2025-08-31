@@ -1251,7 +1251,13 @@ def keyboardListener(key, x, y):
         rad = math.radians(player_angle + 90)
         player_x += math.cos(rad) * move_step * mult
         player_y += math.sin(rad) * move_step * mult
-        maybe_dribble_push(True)
+    
+        # only dribble if user currently holds the ball
+        holder = GG3D_Possession('holder')
+        user   = _user_player()
+        if holder == id(user):
+            maybe_dribble_push(True)
+
     elif k == 's':
         rad = math.radians(player_angle + 90)
         player_x -= math.cos(rad) * move_step * mult
@@ -1359,6 +1365,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 
